@@ -1,0 +1,24 @@
+[package]
+name = "jatsl"
+version = "0.1.0"
+authors = ["Til Blechschmidt <til@blechschmidt.de>"]
+edition = "2018"
+
+[dependencies]
+async-trait = "0.1"
+anyhow = "1.0"
+tokio = { version = "1", default-features = false, features = ["sync", "time", "rt"] }
+futures = "0.3"
+log = "0.4"
+
+hyper = { version = "0.14", optional = true, features = ["server", "http1", "tcp"] }
+serde = { version = "1", optional = true, features = ["derive"] }
+serde_json = { version = "1", optional = true }
+
+[features]
+default = ["status-server"]
+status-server = ["hyper", "serde", "serde_json"]
+
+[dev-dependencies]
+pretty_env_logger = "0.4"
+tokio = { version = "1", default-features = false, features = ["sync", "time", "rt", "macros", "rt-multi-thread"] }
