@@ -3,6 +3,9 @@ name = "jatsl"
 version = "0.1.0"
 authors = ["Til Blechschmidt <til@blechschmidt.de>"]
 edition = "2018"
+description = "Job and task scheduling library"
+license = "MIT"
+repository = "https://github.com/TilBlechschmidt/jatsl"
 
 [dependencies]
 async-trait = "0.1"
