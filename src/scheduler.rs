@@ -312,6 +312,30 @@ impl JobScheduler {
             handle.abort()
         }
     }
+
+    /// Wait until all currently registered jobs report their status as ready.
+    ///
+    /// Most useful when running complex tests which require jobs to be running in the background.
+    /// Checks the status every 100ms, so you probably should not use this in "production" code.
+    pub async fn wait_for_ready(&self) {
+        let mut ready = false;
+
+        while !ready {
+            ready = true;
+
+            for (_, status) in self.status.lock().await.iter() {
+                match status {
+                    JobStatus::Ready(_) => ready = ready && true,
+                    _ => {
+                        ready = false;
+                        break;
+                    }
+                }
+            }
+
+            sleep(Duration::from_millis(100)).await;
+        }
+    }
 }
 
 /// Schedule jobs on a given scheduler with some context
