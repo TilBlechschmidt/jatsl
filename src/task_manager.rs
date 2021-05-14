@@ -103,7 +103,10 @@ pub struct TaskResourceHandle {
 }
 
 impl TaskResourceHandle {
-    #[cfg(test)]
+    /// Dummy resource handle
+    ///
+    /// Intended for use in e.g. unit-tests where access to a resource is required
+    /// but you do not care about any status checking or similar.
     pub fn stub() -> Self {
         let (dependency_tx, _) = channel(0);
         Self {
