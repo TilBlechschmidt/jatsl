@@ -343,7 +343,7 @@ impl JobScheduler {
 macro_rules! schedule {
     ($scheduler:expr, $context:expr, { $($job:ident$(,)? )+ }) => {
         $(
-            $scheduler.spawn_job($job.clone(), $context.clone());
+            $scheduler.spawn_job($job, $context.clone());
         )+
     };
 }
