@@ -18,8 +18,8 @@ pub trait Job {
     /// Whether or not the job honors the termination signal. When this is set to false the job will be terminated externally.
     const SUPPORTS_GRACEFUL_TERMINATION: bool = false;
 
-    fn name(&self) -> &'static str {
-        Self::NAME
+    fn name(&self) -> String {
+        Self::NAME.to_owned()
     }
 
     fn supports_graceful_termination(&self) -> bool {
