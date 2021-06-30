@@ -11,7 +11,7 @@ use hyper::{
 use log::info;
 use serde::Serialize;
 use serde_json::to_string;
-use std::{collections::HashMap, convert::Infallible, marker::PhantomData, sync::Arc};
+use std::{collections::HashMap, convert::Infallible, sync::Arc};
 
 #[derive(Serialize, Eq, PartialEq)]
 enum Status {
@@ -41,21 +41,17 @@ struct StatusResponse<'a> {
 /// Makes the job status list available as an HTTP endpoint. Commonly used for Kubernetes or Docker health probes.
 /// Note that the server does not automatically schedule itself so you have to start it as a job on a scheduler yourself!
 #[derive(Clone)]
-pub struct StatusServer<C> {
+pub struct StatusServer {
     status: Arc<Mutex<HashMap<String, JobStatus>>>,
-    config: Option<Option<u16>>,
-    phantom: PhantomData<C>,
+    port: u16,
 }
 
-impl<C> StatusServer<C> {
+impl StatusServer {
     /// Creates a new server for the given scheduler and port configuration
-    ///
-    /// If the config is `None` the server is disabled. If it is Some(None), the default port is used. Otherwise the provided port is used.
-    pub fn new(scheduler: &JobScheduler, config: Option<Option<u16>>) -> Self {
+    pub fn new(scheduler: &JobScheduler, port: u16) -> Self {
         Self {
             status: scheduler.status.clone(),
-            config,
-            phantom: PhantomData,
+            port,
         }
     }
 
@@ -98,39 +94,33 @@ impl<C> StatusServer<C> {
 }
 
 #[async_trait]
-impl<C: Send + Sync + 'static> Job for StatusServer<C> {
-    type Context = C;
-
+impl Job for StatusServer {
     const NAME: &'static str = module_path!();
     const SUPPORTS_GRACEFUL_TERMINATION: bool = true;
 
-    async fn execute(&self, manager: TaskManager<Self::Context>) -> Result<()> {
-        if let Some(port_config) = self.config {
-            let port = port_config.unwrap_or(47002);
+    async fn execute(
+        &self,
+        manager: TaskManager<()>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+        let status = self.status.clone();
+        let make_svc = make_service_fn(|_conn| {
+            let status = status.clone();
 
-            let status = self.status.clone();
-            let make_svc = make_service_fn(|_conn| {
-                let status = status.clone();
+            async move {
+                Ok::<_, HyperError>(service_fn(move |req| {
+                    StatusServer::generate_report(status.clone(), req)
+                }))
+            }
+        });
 
-                async move {
-                    Ok::<_, HyperError>(service_fn(move |req| {
-                        StatusServer::<C>::generate_report(status.clone(), req)
-                    }))
-                }
-            });
+        let addr = ([0, 0, 0, 0], self.port).into();
+        let server = Server::bind(&addr).serve(make_svc);
+        let graceful = server.with_graceful_shutdown(manager.termination_signal());
 
-            let addr = ([0, 0, 0, 0], port).into();
-            let server = Server::bind(&addr).serve(make_svc);
-            let graceful = server.with_graceful_shutdown(manager.termination_signal());
+        info!("Status server listening on {}", addr);
+        manager.ready().await;
+        graceful.await.map_err(anyhow::Error::new)?;
 
-            info!("Status server listening on {}", addr);
-            manager.ready().await;
-            graceful.await?;
-
-            Ok(())
-        } else {
-            info!("Status server is disabled, exiting.");
-            Ok(())
-        }
+        Ok(())
     }
 }

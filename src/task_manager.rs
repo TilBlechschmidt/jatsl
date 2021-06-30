@@ -37,6 +37,9 @@ pub struct TaskManager<Context> {
     pub context: Context,
 }
 
+/// [`TaskManager`] for Jobs containing no context
+pub type JobManager = TaskManager<()>;
+
 impl<Context> TaskManager<Context> {
     /// Create a new task manager for the given task and context
     pub fn new(

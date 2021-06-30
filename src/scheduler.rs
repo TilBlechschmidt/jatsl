@@ -148,11 +148,8 @@ impl JobScheduler {
 
     async fn manage_job_lifecycle<J: 'static + Job + Send>(
         job: J,
-        ctx: J::Context,
         status_map: Arc<Mutex<HashMap<String, JobStatus>>>,
-    ) where
-        J::Context: Send + Clone,
-    {
+    ) {
         let job_name = job.name().to_owned();
         let mut backoff = Backoff::default();
 
@@ -162,7 +159,7 @@ impl JobScheduler {
         loop {
             let job_instance_id = TASK_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
             let (manager, dependency_rx, readiness_rx, termination_tx) =
-                TaskManager::new(job_instance_id, ctx.clone());
+                TaskManager::new(job_instance_id, ());
 
             let wrapped_termination_tx = if job.supports_graceful_termination() {
                 Some(termination_tx)
@@ -233,18 +230,14 @@ impl JobScheduler {
     /// Assigns a new job to the scheduler.
     ///
     /// This method respawns the job if it crashes, provides access to dependencies, keeps track of its lifecycle and restarts it if dependencies become unavailable.
-    pub fn spawn_job<J: 'static + Job + Send>(&self, job: J, ctx: J::Context)
-    where
-        J::Context: Send + Clone,
-    {
+    pub fn spawn_job<J: 'static + Job + Send>(&self, job: J) {
         let status_map = self.status.clone();
         let termination_handles = self.termination_handles.clone();
         let job_name = job.name().to_owned();
 
         task::spawn(async move {
-            let (job_lifecycle, termination_handle) = abortable(
-                JobScheduler::manage_job_lifecycle(job, ctx, status_map.clone()),
-            );
+            let (job_lifecycle, termination_handle) =
+                abortable(JobScheduler::manage_job_lifecycle(job, status_map.clone()));
 
             termination_handles
                 .lock()
@@ -341,9 +334,9 @@ impl JobScheduler {
 /// Schedule jobs on a given scheduler with some context
 #[macro_export]
 macro_rules! schedule {
-    ($scheduler:expr, $context:expr, { $($job:ident$(,)? )+ }) => {
+    ($scheduler:expr, { $($job:ident$(,)? )+ }) => {
         $(
-            $scheduler.spawn_job($job, $context.clone());
+            $scheduler.spawn_job($job);
         )+
     };
 }

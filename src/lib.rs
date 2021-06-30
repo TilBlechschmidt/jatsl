@@ -10,4 +10,4 @@ use scheduler::JobStatus;
 pub use job::Job;
 pub use scheduler::JobScheduler;
 pub use status_server::StatusServer;
-pub use task_manager::{TaskManager, TaskResourceHandle};
+pub use task_manager::{JobManager, TaskManager, TaskResourceHandle};

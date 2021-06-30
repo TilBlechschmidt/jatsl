@@ -1,7 +1,5 @@
-use anyhow::Result;
+use crate::JobManager;
 use async_trait::async_trait;
-
-use super::task_manager::TaskManager;
 
 /// Persistent execution unit
 ///
@@ -11,8 +9,6 @@ use super::task_manager::TaskManager;
 /// In addition, jobs can support graceful shutdown and a ready state provided by the TaskManager passed to the execute function.
 #[async_trait]
 pub trait Job {
-    type Context;
-
     /// Name of the job displayed in log messages
     const NAME: &'static str;
     /// Whether or not the job honors the termination signal. When this is set to false the job will be terminated externally.
@@ -26,5 +22,8 @@ pub trait Job {
         Self::SUPPORTS_GRACEFUL_TERMINATION
     }
 
-    async fn execute(&self, manager: TaskManager<Self::Context>) -> Result<()>;
+    async fn execute(
+        &self,
+        manager: JobManager,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>;
 }
