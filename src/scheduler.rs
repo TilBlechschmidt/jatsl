@@ -230,20 +230,20 @@ impl JobScheduler {
     /// Assigns a new job to the scheduler.
     ///
     /// This method respawns the job if it crashes, provides access to dependencies, keeps track of its lifecycle and restarts it if dependencies become unavailable.
-    pub fn spawn_job<J: 'static + Job + Send>(&self, job: J) {
+    pub async fn spawn_job<J: 'static + Job + Send>(&self, job: J) {
         let status_map = self.status.clone();
         let termination_handles = self.termination_handles.clone();
         let job_name = job.name().to_owned();
 
+        let (job_lifecycle, termination_handle) =
+            abortable(JobScheduler::manage_job_lifecycle(job, status_map.clone()));
+
+        termination_handles
+            .lock()
+            .await
+            .insert(job_name.clone(), termination_handle);
+
         task::spawn(async move {
-            let (job_lifecycle, termination_handle) =
-                abortable(JobScheduler::manage_job_lifecycle(job, status_map.clone()));
-
-            termination_handles
-                .lock()
-                .await
-                .insert(job_name.clone(), termination_handle);
-
             if job_lifecycle.await.is_err() {
                 JobScheduler::change_status(&status_map, &job_name, JobStatus::Terminated).await;
             }
@@ -336,7 +336,7 @@ impl JobScheduler {
 macro_rules! schedule {
     ($scheduler:expr, { $($job:ident$(,)? )+ }) => {
         $(
-            $scheduler.spawn_job($job);
+            $scheduler.spawn_job($job).await;
         )+
     };
 }

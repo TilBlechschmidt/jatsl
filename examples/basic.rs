@@ -46,7 +46,7 @@ async fn main() {
     let scheduler = JobScheduler::default();
     let job = ExampleJob { name: "world" };
 
-    scheduler.spawn_job(job);
+    scheduler.spawn_job(job).await;
 
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
