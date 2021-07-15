@@ -1,6 +1,6 @@
 [package]
 name = "jatsl"
-version = "0.1.6"
+version = "0.1.7"
 authors = ["Til Blechschmidt <til@blechschmidt.de>"]
 edition = "2018"
 description = "Job and task scheduling library"

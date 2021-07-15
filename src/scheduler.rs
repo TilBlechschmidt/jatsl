@@ -16,7 +16,12 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{sync::watch::Sender as WatchSender, task, task::JoinHandle, time::sleep};
+use tokio::{
+    sync::{oneshot, watch::Sender as WatchSender},
+    task,
+    task::JoinHandle,
+    time::sleep,
+};
 
 use super::job::Job;
 use super::task_manager::{ResourceStatus, TaskManager};
@@ -75,6 +80,8 @@ impl JobStatus {
 pub struct JobScheduler {
     pub(crate) status: Arc<Mutex<HashMap<String, JobStatus>>>,
     termination_handles: Arc<Mutex<HashMap<String, AbortHandle>>>,
+
+    readiness_oneshots: Arc<Mutex<HashMap<String, oneshot::Sender<()>>>>,
 }
 
 impl JobScheduler {
@@ -99,6 +106,7 @@ impl JobScheduler {
         readiness_rx: OneShotReceiver<()>,
         termination_tx: Option<WatchSender<Option<()>>>,
         status_map: Arc<Mutex<HashMap<String, JobStatus>>>,
+        readiness_oneshots: Arc<Mutex<HashMap<String, oneshot::Sender<()>>>>,
         job_name: String,
     ) -> AbortableJoinHandle<()> {
         spawn_abortable(async move {
@@ -110,6 +118,14 @@ impl JobScheduler {
                     JobStatus::Ready(termination_tx),
                 )
                 .await;
+
+                if let Some(oneshot) = readiness_oneshots.lock().await.remove(&job_name) {
+                    if oneshot.send(()).is_err() {
+                        log::error!(
+                            "Failed to react to readiness oneshot, sender might have been dropped."
+                        );
+                    }
+                }
             }
         })
     }
@@ -149,6 +165,7 @@ impl JobScheduler {
     async fn manage_job_lifecycle<J: 'static + Job + Send>(
         job: J,
         status_map: Arc<Mutex<HashMap<String, JobStatus>>>,
+        readiness_oneshots: Arc<Mutex<HashMap<String, oneshot::Sender<()>>>>,
     ) {
         let job_name = job.name().to_owned();
         let mut backoff = Backoff::default();
@@ -177,6 +194,7 @@ impl JobScheduler {
                 readiness_rx,
                 wrapped_termination_tx,
                 status_map.clone(),
+                readiness_oneshots.clone(),
                 job_name.clone(),
             );
 
@@ -230,13 +248,23 @@ impl JobScheduler {
     /// Assigns a new job to the scheduler.
     ///
     /// This method respawns the job if it crashes, provides access to dependencies, keeps track of its lifecycle and restarts it if dependencies become unavailable.
-    pub async fn spawn_job<J: 'static + Job + Send>(&self, job: J) {
+    pub async fn spawn_job<J: 'static + Job + Send>(&self, job: J) -> oneshot::Receiver<()> {
         let status_map = self.status.clone();
+        let readiness_oneshots = self.readiness_oneshots.clone();
         let termination_handles = self.termination_handles.clone();
         let job_name = job.name().to_owned();
 
-        let (job_lifecycle, termination_handle) =
-            abortable(JobScheduler::manage_job_lifecycle(job, status_map.clone()));
+        let (readiness_tx, readiness_rx) = oneshot::channel();
+        readiness_oneshots
+            .lock()
+            .await
+            .insert(job_name.clone(), readiness_tx);
+
+        let (job_lifecycle, termination_handle) = abortable(JobScheduler::manage_job_lifecycle(
+            job,
+            status_map.clone(),
+            readiness_oneshots.clone(),
+        ));
 
         termination_handles
             .lock()
@@ -251,6 +279,8 @@ impl JobScheduler {
             termination_handles.lock().await.remove(&job_name);
             status_map.lock().await.remove(&job_name);
         });
+
+        readiness_rx
     }
 
     /// Gracefully terminates all managed jobs that support it and kill all the others.
@@ -337,6 +367,16 @@ macro_rules! schedule {
     ($scheduler:expr, { $($job:ident$(,)? )+ }) => {
         $(
             $scheduler.spawn_job($job).await;
+        )+
+    };
+}
+
+/// Same as `schedule!` but waits for jobs to reach Ready state for the first time
+#[macro_export]
+macro_rules! schedule_and_wait {
+    ($scheduler:expr, { $($job:ident$(,)? )+ }) => {
+        $(
+            $scheduler.spawn_job($job).await.await.ok();
         )+
     };
 }
