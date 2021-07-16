@@ -374,9 +374,9 @@ macro_rules! schedule {
 /// Same as `schedule!` but waits for jobs to reach Ready state for the first time
 #[macro_export]
 macro_rules! schedule_and_wait {
-    ($scheduler:expr, { $($job:ident$(,)? )+ }) => {
+    ($scheduler:expr, $timeout:expr, { $($job:ident$(,)? )+ }) => {
         $(
-            $scheduler.spawn_job($job).await.await.ok();
+            tokio::time::timeout($timeout, $scheduler.spawn_job($job).await).await?.ok();
         )+
     };
 }
