@@ -121,7 +121,7 @@ impl JobScheduler {
 
                 if let Some(oneshot) = readiness_oneshots.lock().await.remove(&job_name) {
                     if oneshot.send(()).is_err() {
-                        log::error!(
+                        log::trace!(
                             "Failed to react to readiness oneshot, sender might have been dropped."
                         );
                     }
