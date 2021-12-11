@@ -50,5 +50,7 @@ async fn main() {
 
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-    scheduler.terminate_jobs().await;
+    scheduler
+        .terminate_jobs(std::time::Duration::from_secs(10))
+        .await;
 }

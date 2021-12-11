@@ -20,6 +20,16 @@ enum Status {
     Unrecoverable,
 }
 
+/// State of the observed application
+///
+/// Can be used to manually change the ready-state even though all jobs are healthy.
+#[derive(Serialize, Eq, PartialEq, Clone, Copy)]
+pub enum State {
+    Startup,
+    Running,
+    Shutdown,
+}
+
 impl Status {
     fn status_code(&self) -> StatusCode {
         match *self {
@@ -33,6 +43,7 @@ impl Status {
 #[derive(Serialize)]
 struct StatusResponse<'a> {
     status: &'a Status,
+    state: State,
     jobs: HashMap<String, String>,
 }
 
@@ -43,20 +54,27 @@ struct StatusResponse<'a> {
 #[derive(Clone)]
 pub struct StatusServer {
     status: Arc<Mutex<HashMap<String, JobStatus>>>,
+    state: Arc<Mutex<State>>,
     port: u16,
 }
 
 impl StatusServer {
     /// Creates a new server for the given scheduler and port configuration
-    pub fn new(scheduler: &JobScheduler, port: u16) -> Self {
-        Self {
-            status: scheduler.status.clone(),
-            port,
-        }
+    pub fn new(scheduler: &JobScheduler, port: u16) -> (Arc<Mutex<State>>, Self) {
+        let state = Arc::new(Mutex::new(State::Startup));
+        (
+            state.clone(),
+            Self {
+                status: scheduler.status.clone(),
+                state,
+                port,
+            },
+        )
     }
 
     async fn generate_report(
         status_map: Arc<Mutex<HashMap<String, JobStatus>>>,
+        state: Arc<Mutex<State>>,
         _req: Request<Body>,
     ) -> Result<Response<Body>, Infallible> {
         let status_map = status_map.lock().await;
@@ -77,7 +95,13 @@ impl StatusServer {
             jobs.insert(job_name.clone(), format!("{}", job_status));
         }
 
+        let state = state.lock().await;
+        if *state != State::Running {
+            status = Status::Degraded;
+        }
+
         let status_response = StatusResponse {
+            state: *state,
             status: &status,
             jobs,
         };
@@ -103,12 +127,15 @@ impl Job for StatusServer {
         manager: TaskManager<()>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
         let status = self.status.clone();
+        let state = self.state.clone();
+
         let make_svc = make_service_fn(|_conn| {
             let status = status.clone();
+            let state = state.clone();
 
             async move {
                 Ok::<_, HyperError>(service_fn(move |req| {
-                    StatusServer::generate_report(status.clone(), req)
+                    StatusServer::generate_report(status.clone(), state.clone(), req)
                 }))
             }
         });

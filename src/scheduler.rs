@@ -283,8 +283,43 @@ impl JobScheduler {
         readiness_rx
     }
 
+    /// Gracefully terminates a single job by name if supported, otherwise kill it with force.
+    pub async fn terminate_job(&self, name: &String, grace_period: Duration) {
+        // 1. Send termination signal to job
+        {
+            let status_map = self.status.lock().await;
+            if let Some(JobStatus::Ready(Some(job))) = status_map.get(name) {
+                job.send(Some(())).ok();
+            } else if let Some(forceful_handle) = self.termination_handles.lock().await.get(name) {
+                forceful_handle.abort();
+            }
+        }
+
+        // 2. Wait for job to die
+        let check_interval = Duration::from_millis(10);
+        let mut passed_duration = Duration::ZERO;
+        while passed_duration < grace_period {
+            {
+                let termination_handles = self.termination_handles.lock().await;
+
+                if !termination_handles.contains_key(name) {
+                    break;
+                }
+            }
+
+            sleep(check_interval).await;
+            passed_duration += check_interval;
+        }
+
+        // 3. Make sure it is dead
+        let termination_handles = self.termination_handles.lock().await;
+        if let Some(handle) = termination_handles.get(name) {
+            handle.abort();
+        }
+    }
+
     /// Gracefully terminates all managed jobs that support it and kill all the others.
-    pub async fn terminate_jobs(&self) {
+    pub async fn terminate_jobs(&self, grace_period: Duration) {
         // 1. Send termination signal to jobs that support graceful shutdown and terminate ones that don't (or ones that aren't running)
         {
             let status = self.status.lock().await;
@@ -301,8 +336,9 @@ impl JobScheduler {
         }
 
         // 2. Give alive jobs some time to gracefully terminate (if applicable)
-        // TODO Make duration an environment variable or property
-        for _ in 0..60000 {
+        let check_interval = Duration::from_millis(10);
+        let mut passed_duration = Duration::ZERO;
+        while passed_duration < grace_period {
             {
                 let termination_handles = self.termination_handles.lock().await;
                 let status = self.status.lock().await;
@@ -326,7 +362,8 @@ impl JobScheduler {
                 }
             }
 
-            sleep(Duration::from_millis(10)).await;
+            sleep(check_interval).await;
+            passed_duration += check_interval;
         }
 
         // 3. Call termination handle for all remaining jobs
